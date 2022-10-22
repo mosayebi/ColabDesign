@@ -123,7 +123,7 @@ class mk_mpnn_model(design_model):
   def sample_parallel(self, batch=10, temperature=0.1, rescore=False, **kwargs):
     '''sample new sequence(s) in parallel'''
     I = copy_dict(self._inputs)
-    kwargs.update({'temperature': temperature})
+    #kwargs.update({'temperature': temperature})
     I.update(kwargs)
 
     key = I.pop("key",self.key())
