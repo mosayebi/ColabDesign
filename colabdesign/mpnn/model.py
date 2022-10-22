@@ -115,7 +115,9 @@ class mk_mpnn_model(design_model):
   def sample_parallel(self, temperature=0.1, batch=10, rescore=False, **kwargs):
     '''sample new sequence(s) in parallel'''
     I = copy_dict(self._inputs)
+    kwargs.update({'temperature': temperature})
     I.update(kwargs)
+
     key = I.pop("key",self.key())
     keys = jax.random.split(key,batch)
     O = self._sample_parallel(keys, I, temperature, self._tied_lengths)
@@ -154,7 +156,8 @@ class mk_mpnn_model(design_model):
            'chain_idx': chain_idx}
       I.update(kwargs)
       for k in ["S","bias"]:
-        if k in I: I[k] = _aa_convert(I[k])
+        if k in I:
+          I[k] = _aa_convert(I[k])
 
       O = self._model.score(self._model.params, key, I)
       O["S"] = _aa_convert(O["S"], rev=True)
@@ -171,7 +174,8 @@ class mk_mpnn_model(design_model):
 
       I.update(kwargs)
       for k in ["S","bias"]:
-        if k in I: I[k] = _aa_convert(I[k])
+        if k in I: 
+          I[k] = _aa_convert(I[k])
       
       O = self._model.sample(self._model.params, key, I, tied_lengths)
       O["S"] = _aa_convert(O["S"], rev=True)

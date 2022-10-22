@@ -81,21 +81,21 @@ class mpnn_sample:
       logits_t = self.W_out(h_V_t)
       if tied: logits_t = logits_t.mean(0,keepdims=True)
       x["logits"] = x["logits"].at[t].set(logits_t)
-
+      
       ##############
       # sample
       ##############
       if sample:
         # add bias
         if "bias" in I:
-          S_logits_t = logits_t + I["bias"][t]
+          S_logits_t = (logits_t / I["temperature"] + I["bias"][t] / I.get('bias_temperature', 1.0))
         else:
-          S_logits_t = logits_t
+          S_logits_t = logits_t / I["temperature"]
 
         if tied: S_logits_t = S_logits_t.mean(0,keepdims=True)
 
         # sample character
-        S_logits_t = S_logits_t/I["temperature"] + jax.random.gumbel(key, S_logits_t.shape)
+        S_logits_t = S_logits_t + jax.random.gumbel(key, S_logits_t.shape)
         S_t = jax.nn.one_hot(S_logits_t[...,:20].argmax(-1), 21)
 
         # backprop through sampling step
