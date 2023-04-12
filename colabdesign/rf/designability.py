@@ -180,7 +180,8 @@ potentials.guide_scale=2 potentials.guide_decay=quadratic"
         stdout, stderr = process.communicate()
         if stderr != b"":
             print(stderr.decode())
-            raise RuntimeError()
+            if 'Error' in stderr.decode():
+                raise RuntimeError()
         else:
             self.post_run_fix()
         self.final_pdb = f"{self.output_prefix}_0.pdb"
@@ -407,8 +408,7 @@ class Designability:
             assert self.decoding_order is not None
             kwargs["decoding_order"] = self.decoding_order
             print("using the instance bias/decoding_order for hybrid sequence sampling")
-        if "bias" in kwargs and kwargs["bias"] is not None:
-            self.bias = kwargs["bias"].copy()
+        elif "bias" in kwargs and kwargs["bias"] is not None:
             kwargs["bias"] /= bias_temp
         if "decoding_order" in kwargs and kwargs["decoding_order"] is not None:
             self.decoding_order = kwargs["decoding_order"]
