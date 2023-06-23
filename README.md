@@ -10,6 +10,12 @@
 - P(sequence)
   - [WIP] [MSA_transformer](/esm_msa)
   - [WIP] [SEQ](/seq) - (GREMLIN, mfDCA, arDCA, plmDCA, bmDCA, etc)
+- P(structure)
+  - [Rfdiffusion](/rf)
+
+### Where can I chat with other ColabDesign users?
+  - See our [Discord](https://discord.gg/gna8maru7d) channel!
+
 
 ### Presentations
 [Slides](https://docs.google.com/presentation/d/1Zy7lf_LBK0_G3e7YQLSPP5aj_-AR5I131fTsxJrLdg4/)
@@ -20,6 +26,4 @@
 - Shihao Feng [@JeffSHF](https://github.com/JeffSHF)
 - Justas Dauparas [@dauparas](https://github.com/dauparas)
 - Weikun.Wu [@guyujun](https://github.com/guyujun) (from [Levinthal.bio](http://levinthal.bio/en/))
-
-### Related Projects:
-- [TRILL](https://trill.readthedocs.io/en/latest/home.html) (TRaining and Inference using the Language of Life) is a sandbox for creative protein engineering and discovery.
+- Christopher Frank [@chris-kafka](https://github.com/chris-kafka)
