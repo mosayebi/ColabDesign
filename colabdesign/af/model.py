@@ -20,14 +20,30 @@ from colabdesign.af.inputs import _af_inputs, update_seq, update_aatype
 # MK_DESIGN_MODEL - initialize model, and put it all together
 ################################################################
 
+
+from pathlib import Path
+# download the AF2 params if needed
+default_data_dir = Path(__file__).parent.parent / "params"
+if not default_data_dir.exists():
+    import os
+    default_data_dir.mkdir(exist_ok=True, parents=True)
+    print(f"[downloading alphafold params in '{default_data_dir}']")
+    # os.system(
+    #     f"curl -fsSL https://storage.googleapis.com/alphafold/alphafold_params_2022-03-02.tar | tar x -C {default_data_dir}"
+    # )
+    os.system(
+        f"curl -fsSL https://storage.googleapis.com/alphafold/alphafold_params_2022-12-06.tar | tar x -C {default_data_dir}"
+    )
+
+
 class mk_af_model(design_model, _af_inputs, _af_loss, _af_prep, _af_design, _af_utils):
   def __init__(self,
-               protocol="fixbb", 
+               protocol="fixbb",
                use_multimer=False,
                use_templates=False,
                debug=False,
-               data_dir=".", 
-               **kwargs):  
+               data_dir=str(default_data_dir),
+               **kwargs):
     assert protocol in ["fixbb","hallucination","binder","partial"]
 
     self.protocol = protocol
