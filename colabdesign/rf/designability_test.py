@@ -6,6 +6,7 @@ from colabdesign.shared.protein import pdb_to_string
 from colabdesign.shared.parse_args import parse_args
 
 from pathlib import Path
+from tqdm.auto import tqdm
 
 import pandas as pd
 import numpy as np
@@ -162,7 +163,7 @@ def main(argv):
       out["n"] = []
       af_model.prep_inputs(pdb_filename, **prep_flags)
       for k in af_terms: out[k] = []
-      for n in range(o.num_seqs):
+      for n in tqdm(range(o.num_seqs), desc=f"AF [{Path(pdb_filename).stem}]"):
         out["design"].append(m)
         out["n"].append(n)
         sub_seq = out["seq"][n].replace("/","")[-af_model._len:]
@@ -206,6 +207,7 @@ def main(argv):
   )
   df['pdb_path'] = all_pdb_paths
   df.to_csv(f'{o.loc}/designability_test_results.csv', index=False)
+  print(f"designability test results are saved to '{o.loc}/designability_test_results.csv'.")
 
 if __name__ == "__main__":
    main(sys.argv[1:])
