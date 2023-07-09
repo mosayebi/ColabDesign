@@ -23,7 +23,7 @@ from colabdesign.af.inputs import _af_inputs, update_seq, update_aatype
 
 from pathlib import Path
 # download the AF2 params if needed
-default_data_dir = Path(__file__).parent.parent.parent / "params"
+default_data_dir = Path(__file__).parent.parent / "params"
 if not default_data_dir.exists():
     import os
     default_data_dir.mkdir(exist_ok=True, parents=True)
