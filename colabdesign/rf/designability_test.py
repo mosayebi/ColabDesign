@@ -5,6 +5,8 @@ from colabdesign.af import mk_af_model
 from colabdesign.shared.protein import pdb_to_string
 from colabdesign.shared.parse_args import parse_args
 
+from pathlib import Path
+
 import pandas as pd
 import numpy as np
 from string import ascii_uppercase, ascii_lowercase
@@ -94,7 +96,7 @@ def main(argv):
                   "binder_chain":",".join(binder_chains),
                   "rm_aa":o.rm_aa}
     opt_extra = {}
-  
+
   elif sum(fixed_pos) > 0:
     protocol = "partial"
     print("protocol=partial")
@@ -108,6 +110,7 @@ def main(argv):
                   "copies":o.copies,
                   "homooligomer":o.copies>1,
                   "rm_aa":o.rm_aa}
+
   else:
     protocol = "fixbb"
     print("protocol=fixbb")
@@ -118,9 +121,9 @@ def main(argv):
                   "rm_aa":o.rm_aa}
 
   batch_size = 8
-  if o.num_seqs < batch_size:    
+  if o.num_seqs < batch_size:
     batch_size = o.num_seqs
-  
+
   print("running proteinMPNN...")
   sampling_temp = 0.1
   mpnn_model = mk_mpnn_model()
@@ -152,6 +155,7 @@ def main(argv):
   best = {"rmsd":np.inf,"design":0,"n":0}
   print("running AlphaFold...")
   os.system(f"mkdir -p {o.loc}/all_pdb")
+  all_pdb_paths = []
   with open(f"{o.loc}/design.fasta","w") as fasta:
     for m,(out,pdb_filename) in enumerate(zip(outs,pdbs)):
       out["design"] = []
@@ -171,7 +175,9 @@ def main(argv):
         rmsd = out["rmsd"][-1]
         if rmsd < best["rmsd"]:
           best = {"design":m,"n":n,"rmsd":rmsd}
-        af_model.save_current_pdb(f"{o.loc}/all_pdb/design{m}_n{n}.pdb")
+        save_path = f"{o.loc}/all_pdb/design{m}_n{n}.pdb"
+        af_model.save_current_pdb(save_path)
+        all_pdb_paths.append(str(Path(save_path).resolve()))
         af_model._save_results(save_best=True, verbose=False)
         af_model._k += 1
         score_line = [f'design:{m} n:{n}',f'mpnn:{out["score"][n]:.3f}']
@@ -188,10 +194,18 @@ def main(argv):
     remark_text = f"design {best['design']} N {best['n']} RMSD {best['rmsd']:.3f}"
     handle.write(f"REMARK 001 {remark_text}\n")
     handle.write(open(f"{o.loc}/best_design{best['design']}.pdb", "r").read())
-    
+
   labels[2] = "mpnn"
-  df = pd.DataFrame(data, columns=labels)
-  df.to_csv(f'{o.loc}/mpnn_results.csv')
+  df = pd.DataFrame(data, columns=labels).assign(
+    input_pdb_path=str(Path(o.pdb).resolve()),
+    contigs=o.contigs,
+    rm_aa=o.rm_aa,
+    use_multimer=o.use_multimer,
+    num_recycles=o.num_recycles,
+    initial_guess=o.initial_guess,
+  )
+  df['pdb_path'] = all_pdb_paths
+  df.to_csv(f'{o.loc}/designability_test_results.csv', index=False)
 
 if __name__ == "__main__":
    main(sys.argv[1:])
