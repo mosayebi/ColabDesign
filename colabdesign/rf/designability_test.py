@@ -29,6 +29,7 @@ def get_info(contig):
       free_chain = True
   return F,[fixed_chain,free_chain]
 
+
 def main(argv):
   ag = parse_args()
   ag.txt("-------------------------------------------------------------------------------------")
@@ -51,6 +52,24 @@ def main(argv):
   ag.add(["num_designs="  ],      1,  int, ["number of designs to evaluate"])
   ag.txt("-------------------------------------------------------------------------------------")
   o = ag.parse(argv)
+
+  def write_csv(data, labels, all_pdb_paths, verbose=False):
+    labels_copy = labels.copy()
+    labels_copy[2] = "mpnn"
+    df = pd.DataFrame(data, columns=labels_copy).assign(
+      input_pdb_path=str(Path(o.pdb).resolve()),
+      contigs=o.contigs,
+      rm_aa=o.rm_aa,
+      use_multimer=o.use_multimer,
+      num_recycles=o.num_recycles,
+      initial_guess=o.initial_guess,
+    )
+    df['pdb_path'] = all_pdb_paths
+    csv = f'{o.loc}/designability_test_results.csv'
+    df.to_csv(csv, index=False)
+    if verbose:
+      print(f"designability test results are saved to '{csv}'.")
+
 
   if None in [o.pdb, o.loc, o.contigs]:
     ag.usage("Missing Required Arguments")
@@ -187,7 +206,9 @@ def main(argv):
         print(" ".join(score_line)+" "+out["seq"][n])
         line = f'>{"|".join(score_line)}\n{out["seq"][n]}'
         fasta.write(line+"\n")
-      data += [[out[k][n] for k in labels] for n in range(o.num_seqs)]
+        data.append([out[k][n] for k in labels])
+        write_csv(data, labels, all_pdb_paths, verbose=False)
+      #data += [[out[k][n] for k in labels] for n in range(o.num_seqs)]
       af_model.save_pdb(f"{o.loc}/best_design{m}.pdb")
 
   # save best
@@ -196,18 +217,7 @@ def main(argv):
     handle.write(f"REMARK 001 {remark_text}\n")
     handle.write(open(f"{o.loc}/best_design{best['design']}.pdb", "r").read())
 
-  labels[2] = "mpnn"
-  df = pd.DataFrame(data, columns=labels).assign(
-    input_pdb_path=str(Path(o.pdb).resolve()),
-    contigs=o.contigs,
-    rm_aa=o.rm_aa,
-    use_multimer=o.use_multimer,
-    num_recycles=o.num_recycles,
-    initial_guess=o.initial_guess,
-  )
-  df['pdb_path'] = all_pdb_paths
-  df.to_csv(f'{o.loc}/designability_test_results.csv', index=False)
-  print(f"designability test results are saved to '{o.loc}/designability_test_results.csv'.")
+  write_csv(data, labels, all_pdb_paths, verbose=True)
 
 if __name__ == "__main__":
    main(sys.argv[1:])
