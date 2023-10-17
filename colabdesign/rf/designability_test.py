@@ -76,7 +76,7 @@ def main(argv):
     )
     df['pdb_path'] = all_pdb_paths
     csv = f'{o.loc}/designability_test_results.csv'
-    df.to_csv(csv, index=False)
+    df.drop('pdb', axis=1).to_csv(csv, index=False)
     if verbose:
       print(f"designability test results are saved to '{csv}'.")
 
