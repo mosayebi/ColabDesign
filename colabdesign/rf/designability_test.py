@@ -13,6 +13,10 @@ import numpy as np
 from string import ascii_uppercase, ascii_lowercase
 alphabet_list = list(ascii_uppercase+ascii_lowercase)
 
+from protein_tools.util import save_obj, load_obj
+from colabdesign.rf.utils import get_esm2_bias_and_decoding_order, get_msa_transformer_bias_and_decoding_order
+
+
 def get_info(contig):
   F = []
   free_chain = False
@@ -43,15 +47,23 @@ def main(argv):
   ag.txt("-------------------------------------------------------------------------------------")
   ag.txt("OPTIONAL")
   ag.txt("-------------------------------------------------------------------------------------")
-  ag.add(["copies="       ],         1,    int, ["number of repeating copies"])
-  ag.add(["num_seqs="     ],         8,    int, ["number of mpnn designs to evaluate"])
-  ag.add(["initial_guess" ],     False,   None, ["initialize previous coordinates"])
-  ag.add(["use_multimer"  ],     False,   None, ["use alphafold_multimer_v3"])
-  ag.add(["use_soluble"   ],     False,   None, ["use solubleMPNN"])
-  ag.add(["num_recycles=" ],         3,    int, ["number of recycles"])
-  ag.add(["rm_aa="],               "C",    str, ["disable specific amino acids from being sampled"])
-  ag.add(["num_designs="  ],         1,    int, ["number of designs to evaluate"])
-  ag.add(["mpnn_sampling_temp=" ], 0.1,  float, ["sampling temperature used by proteinMPNN"])
+  ag.add(["copies="               ],          1,    int,   ["number of repeating copies"])
+  ag.add(["num_seqs="             ],          8,    int,   ["number of mpnn designs to evaluate"])
+  ag.add(["initial_guess"         ],      False,   None,   ["initialize previous coordinates"])
+  ag.add(["use_multimer"          ],      False,   None,   ["use alphafold_multimer_v3"])
+  ag.add(["use_soluble"           ],      False,   None,   ["use solubleMPNN"])
+  ag.add(["num_recycles="         ],          3,    int,   ["number of recycles"])
+  ag.add(["rm_aa="                ],        "C",    str,   ["disable specific amino acids from being sampled"])
+  ag.add(["num_designs="          ],          1,    int,   ["number of designs to evaluate"])
+  ag.add(["mpnn_temp="            ],        0.1,  float,   ["sampling temperature used by proteinMPNN"])
+  ag.add(["bias_temp="            ],        1.0,  float,   ["sampling temperature used to scale bias"])
+  ag.add(["save_logits"           ],      False,   None,   ["save logits"])
+  ag.add(["esm2_priors"           ],      False,   None,   ["enables ESM2 priors"])
+  ag.add(["input_seq="            ],       None,    str,   ["input sequence for ESM2 priors calculation, if not given the sequence is taken from the input PDB"])
+  ag.add(["msa_transformer_priors"],      False,   None,   ["enables ESM MSA Transformer priors"])
+  ag.add(["input_msa="            ],      False,    str,   ["input msa file for MSA-Transformer priors calculation (format: .a3m)"])
+  ag.add(["bias_npy="             ],       None,    str,   ["bias numpy array file"])
+  ag.add(["decoding_order_npy="   ],       None,    str,   ["decoding_order numpy array file"])
   ag.txt("-------------------------------------------------------------------------------------")
   o = ag.parse(argv)
 
@@ -60,11 +72,7 @@ def main(argv):
     labels_copy[2] = "mpnn"
     df = pd.DataFrame(data, columns=labels_copy).assign(
       input_pdb_path=str(Path(o.pdb).resolve()),
-      contigs=o.contigs,
-      rm_aa=o.rm_aa,
-      use_multimer=o.use_multimer,
-      num_recycles=o.num_recycles,
-      initial_guess=o.initial_guess,
+      **o.__dict__
     )
     df['pdb_path'] = all_pdb_paths
     csv = f'{o.loc}/designability_test_results.csv'
@@ -104,6 +112,39 @@ def main(argv):
            "best_metric":"rmsd",
            "use_multimer":o.use_multimer,
            "model_names":["model_1_multimer_v3" if o.use_multimer else "model_1_ptm"]}
+
+  # work out biases
+  bias_info = []
+  for m in range(o.num_designs):
+    if o.num_designs == 0:
+      pdb_filename = o.pdb
+    else:
+      pdb_filename = o.pdb.replace("_0.pdb",f"_{m}.pdb")
+    bias, decoding_order = None, None
+    if o.bias_npy is not None:
+      print(f"using bias from '{o.bias_npy}'")
+      bias = np.load(o.bias_npy)
+    if o.decoding_order_npy is not None:
+      print(f"using decoding_order from '{o.decoding_order_npy}'")
+      decoding_order = np.load(o.decoding_order_npy)
+    if o.esm2_priors and (not None is [o.bias_npy, o.decoding_order_npy]):
+      if o.msa_transformer_priors:
+        raise RuntimeError("'msa_transformer_priors' and 'esm2_priors' cannot be enabled at the same time!")
+      if o.input_seq:
+        seq = o.input_seq
+      else:
+        from protein_tools.pdb import PDB
+        seq = ''.join(PDB.load(pdb_filename).get_seqs().values())
+        print(f"input sequence for ESM2 priors inferred from the pdb file:\n{seq}")
+      bias, decoding_order = get_esm2_bias_and_decoding_order(seq, fixed_pos, device='cuda') # does not contain rm_aa biases
+    if o.msa_transformer_priors and (not None is [o.bias_npy, o.decoding_order_npy]):
+      if o.esm2_priors:
+        raise RuntimeError("'msa_transformer_priors' and 'esm2_priors' cannot be enabled at the same time!")
+      from protein_tools.msa import parse_a3m
+      msa = parse_a3m(o.input_msa)
+      bias, decoding_order = get_msa_transformer_bias_and_decoding_order(msa, fixed_pos, device='cuda') # does not contain rm_aa biases
+    bias_info.append((bias, decoding_order))
+
 
   if sum(both_chains) == 0 and sum(fixed_chains) > 0 and sum(free_chains) > 0:
     protocol = "binder"
@@ -147,8 +188,7 @@ def main(argv):
     batch_size = o.num_seqs
 
   print("running proteinMPNN...")
-  sampling_temp = 0.1
-  mpnn_model = mk_mpnn_model(weights="soluble" if o.use_soluble else "original")
+  mpnn_model = mk_mpnn_model(weights="soluble" if o.use_soluble else "original", verbose=True)
   outs = []
   pdbs = []
   for m in range(o.num_designs):
@@ -162,8 +202,34 @@ def main(argv):
       p = np.where(fixed_pos)[0]
       af_model.opt["fix_pos"] = p[p < af_model._len]
 
+
     mpnn_model.get_af_inputs(af_model)
-    outs.append(mpnn_model.sample(num=o.num_seqs//batch_size, batch=batch_size, temperature=sampling_temp))
+    bias, decoding_order = bias_info[m]
+    sampling_kws = {}
+    if not bias is None:
+      total_bias = mpnn_model._inputs['bias'] + bias    # to include rm_aa/fixed_pos biases in ._input['bias']
+      sampling_kws.update({'bias': total_bias.copy() * o.mpnn_temp / o.bias_temp})
+    if not decoding_order is None:
+      sampling_kws.update({'decoding_order': decoding_order.copy()})
+    outs.append(mpnn_model.sample(num=o.num_seqs//batch_size,
+                                  batch=batch_size,
+                                  temperature=o.mpnn_temp,
+                                  **sampling_kws
+                                  ))
+
+    if o.save_logits:
+      fn = f"{o.loc}/logits_{m}.pkl"
+      save_obj(
+        dict(
+          mpnn_logits=mpnn_model.get_logits(),
+          mpnn_unconditional_logits=mpnn_model.get_unconditional_logits(),
+          total_bias=total_bias,
+          bias=bias,
+          decoding_order=decoding_order,
+          mutation_sites=np.where(np.array(fixed_pos)==0)[0],
+          kwargs=o,
+        ), fn)
+      print(f"logits are saved to '{fn}'.")
 
   if protocol == "binder":
     af_terms = ["plddt","i_ptm","i_pae","rmsd"]
