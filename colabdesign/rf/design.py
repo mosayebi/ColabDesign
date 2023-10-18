@@ -193,7 +193,7 @@ def run_ananas(pdb_str, path, sym=None):
     with open(pdb_filename, "w") as handle:
         handle.write(pdb_str)
 
-    cmd = f"./ananas {pdb_filename} -u -j {out_filename}"
+    cmd = f"ananas {pdb_filename} -u -j {out_filename}"
     if sym is None:
         os.system(cmd)
     else:
