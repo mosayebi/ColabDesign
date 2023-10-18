@@ -651,7 +651,7 @@ def get_parser():
         type=str,
         nargs="+",
         default=[],
-        help="Guiding potential in the RFdiffusion inference. To use more than one potential, leave a space between each potential string. By default not potential is applied."
+        help="Guiding potential in the RFdiffusion inference. To use more than one potential, leave a space between each potential string. By default no potential is applied. "
         "Example: --potential_string 'type:olig_contacts,weight_intra:1,weight_inter:0.1'",
     )
     parser.add_argument(
