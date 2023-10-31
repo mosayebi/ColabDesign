@@ -14,7 +14,10 @@ from string import ascii_uppercase, ascii_lowercase
 alphabet_list = list(ascii_uppercase+ascii_lowercase)
 
 from protein_tools.util import save_obj, load_obj
-from colabdesign.rf.utils import get_esm2_bias_and_decoding_order, get_msa_transformer_bias_and_decoding_order
+from protein_tools.pdb import PDB
+from colabdesign.rf.utils import (get_esm2_bias_and_decoding_order,
+                                  get_msa_transformer_bias_and_decoding_order,
+                                  get_extra_aa_bias)
 
 
 def get_info(contig):
@@ -64,6 +67,8 @@ def main(argv):
   ag.add(["input_msa="            ],      False,    str,   ["input msa file for MSA-Transformer priors calculation (format: .a3m)"])
   ag.add(["bias_npy="             ],       None,    str,   ["bias numpy array file"])
   ag.add(["decoding_order_npy="   ],       None,    str,   ["decoding_order numpy array file"])
+  ag.add(["fasta="                ],       None,    str,   ["fasta file containing sequences to be assessed"])
+  ag.add(["aa_bias="              ],       None,    str,   ["json file containing user-defined aa biases as dict. e.g. '{A: -1.1, K: 0.7}'"])
   ag.txt("-------------------------------------------------------------------------------------")
   o = ag.parse(argv)
 
@@ -133,7 +138,6 @@ def main(argv):
       if o.input_seq:
         seq = o.input_seq
       else:
-        from protein_tools.pdb import PDB
         seq = ''.join(PDB.load(pdb_filename).get_seqs().values())
         print(f"input sequence for ESM2 priors inferred from the pdb file:\n{seq}")
       bias, decoding_order = get_esm2_bias_and_decoding_order(seq, fixed_pos, device='cuda') # does not contain rm_aa biases
@@ -143,6 +147,11 @@ def main(argv):
       from protein_tools.msa import parse_a3m
       msa = parse_a3m(o.input_msa)
       bias, decoding_order = get_msa_transformer_bias_and_decoding_order(msa, fixed_pos, device='cuda') # does not contain rm_aa biases
+    if o.aa_bias is not None:
+      aa_bias_dict = eval(o.aa_bias)
+      print(f"aa biases are loaded as {aa_bias_dict}")
+      seq_len = len(''.join(PDB.load(pdb_filename).get_seqs().values()))
+      bias = get_extra_aa_bias(aa_bias_dict, seq_len, bias)
     bias_info.append((bias, decoding_order))
 
 
@@ -187,49 +196,71 @@ def main(argv):
   if o.num_seqs < batch_size:
     batch_size = o.num_seqs
 
-  print("running proteinMPNN...")
-  mpnn_model = mk_mpnn_model(weights="soluble" if o.use_soluble else "original", verbose=True)
-  outs = []
-  pdbs = []
-  for m in range(o.num_designs):
-    if o.num_designs == 0:
-      pdb_filename = o.pdb
-    else:
-      pdb_filename = o.pdb.replace("_0.pdb",f"_{m}.pdb")
-    pdbs.append(pdb_filename)
-    af_model.prep_inputs(pdb_filename, **prep_flags)
-    if protocol == "partial":
-      p = np.where(fixed_pos)[0]
-      af_model.opt["fix_pos"] = p[p < af_model._len]
+  if o.fasta is None:
+    print("running proteinMPNN...")
+    mpnn_model = mk_mpnn_model(weights="soluble" if o.use_soluble else "original", verbose=True)
+    outs = []
+    pdbs = []
+    for m in range(o.num_designs):
+      if o.num_designs == 0:
+        pdb_filename = o.pdb
+      else:
+        pdb_filename = o.pdb.replace("_0.pdb",f"_{m}.pdb")
+      pdbs.append(pdb_filename)
+      af_model.prep_inputs(pdb_filename, **prep_flags)
+      if protocol == "partial":
+        p = np.where(fixed_pos)[0]
+        af_model.opt["fix_pos"] = p[p < af_model._len]
 
 
-    mpnn_model.get_af_inputs(af_model)
-    bias, decoding_order = bias_info[m]
-    sampling_kws = {}
-    if not bias is None:
-      total_bias = mpnn_model._inputs['bias'] + bias    # to include rm_aa/fixed_pos biases in ._input['bias']
-      sampling_kws.update({'bias': total_bias.copy() * o.mpnn_temp / o.bias_temp})
-    if not decoding_order is None:
-      sampling_kws.update({'decoding_order': decoding_order.copy()})
-    outs.append(mpnn_model.sample(num=o.num_seqs//batch_size,
-                                  batch=batch_size,
-                                  temperature=o.mpnn_temp,
-                                  **sampling_kws
-                                  ))
+      mpnn_model.get_af_inputs(af_model)
+      bias, decoding_order = bias_info[m]
+      sampling_kws = {}
+      if not bias is None:
+        total_bias = mpnn_model._inputs['bias'] + bias    # to include rm_aa/fixed_pos biases in ._input['bias']
+        sampling_kws.update({'bias': total_bias.copy() * o.mpnn_temp / o.bias_temp})
+      if not decoding_order is None:
+        sampling_kws.update({'decoding_order': decoding_order.copy()})
+      outs.append(mpnn_model.sample(num=o.num_seqs//batch_size,
+                                    batch=batch_size,
+                                    temperature=o.mpnn_temp,
+                                    **sampling_kws
+                                    ))
 
-    if o.save_logits:
-      fn = f"{o.loc}/logits_{m}.pkl"
-      save_obj(
-        dict(
-          mpnn_logits=mpnn_model.get_logits(),
-          mpnn_unconditional_logits=mpnn_model.get_unconditional_logits(),
-          total_bias=total_bias,
-          bias=bias,
-          decoding_order=decoding_order,
-          mutation_sites=np.where(np.array(fixed_pos)==0)[0],
-          kwargs=o,
-        ), fn)
-      print(f"logits are saved to '{fn}'.")
+      if o.save_logits:
+        fn = f"{o.loc}/logits_{m}.pkl"
+        save_obj(
+          dict(
+            mpnn_logits=mpnn_model.get_logits(),
+            mpnn_unconditional_logits=mpnn_model.get_unconditional_logits(),
+            total_bias=total_bias,
+            bias=bias,
+            decoding_order=decoding_order,
+            mutation_sites=np.where(np.array(fixed_pos)==0)[0],
+            kwargs=o,
+          ), fn)
+        print(f"logits are saved to '{fn}'.")
+  else:
+    print(f"sequences are loaded from `{o.fasta}`")
+    raise NotImplementedError('--fasta is not implemented!')
+    # read fasta
+    from Bio import SeqIO
+    fasta_sequences = SeqIO.parse(open(o.fasta),'fasta')
+    outs = []
+    pdbs = []
+    for m in range(o.num_designs):
+      if o.num_designs == 0:
+        pdb_filename = o.pdb
+      else:
+        pdb_filename = o.pdb.replace("_0.pdb",f"_{m}.pdb")
+      pdbs.append(pdb_filename)
+      names, seqs = [], []
+      for i in range(o.num_seqs):
+         f = next(fasta_sequences)
+         seqs.append(str(f.seq))
+         names.append(f.id)
+      outs.append({"name":names, "seq": seqs, "score": [np.nan]*o.num_seqs})
+
 
   if protocol == "binder":
     af_terms = ["plddt","i_ptm","i_pae","rmsd"]

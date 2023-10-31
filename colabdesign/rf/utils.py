@@ -417,3 +417,10 @@ def get_msa_transformer_bias_and_decoding_order(msa, fixed_pos, device="cpu"):
     empty_cache()
     clear_mem()
     return get_bias_and_decoding_order(esm_priors)
+
+def get_extra_aa_bias(aa_bias_dict, seq_len, bias):
+    aa_bias = np.zeros((seq_len, len(order_aa)))
+    aa_bias_dict = {aa.upper(): b for aa, b in aa_bias_dict.items()}
+    for i, aa in order_aa.items():
+        aa_bias[:, i] = aa_bias_dict.get(aa, 0)
+    return aa_bias if bias is None else bias+aa_bias
