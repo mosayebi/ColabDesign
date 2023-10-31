@@ -68,7 +68,7 @@ def main(argv):
   ag.add(["bias_npy="             ],       None,    str,   ["bias numpy array file"])
   ag.add(["decoding_order_npy="   ],       None,    str,   ["decoding_order numpy array file"])
   ag.add(["fasta="                ],       None,    str,   ["fasta file containing sequences to be assessed"])
-  ag.add(["aa_bias="              ],       None,    str,   ["json file containing user-defined aa biases as dict. e.g. '{A: -1.1, K: 0.7}'"])
+  ag.add(["aa_bias="              ],       None,    str,   ["json file containing user-defined aa biases as dict. e.g. \"{'A': -1.1, 'K': 0.7}\""])
   ag.txt("-------------------------------------------------------------------------------------")
   o = ag.parse(argv)
 
