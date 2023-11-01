@@ -216,11 +216,14 @@ def main(argv):
       mpnn_model.get_af_inputs(af_model)
       bias, decoding_order = bias_info[m]
       sampling_kws = {}
+      msg = f"mpnn_temp={o.mpnn_temp}"
       if not bias is None:
         total_bias = mpnn_model._inputs['bias'] + bias    # to include rm_aa/fixed_pos biases in ._input['bias']
+        msg += (f", bias_temp={o.bias_temp}")
         sampling_kws.update({'bias': total_bias.copy() * o.mpnn_temp / o.bias_temp})
       if not decoding_order is None:
         sampling_kws.update({'decoding_order': decoding_order.copy()})
+      print(f"[{Path(pdb_filename).stem}] sampling at {msg}")
       outs.append(mpnn_model.sample(num=o.num_seqs//batch_size,
                                     batch=batch_size,
                                     temperature=o.mpnn_temp,

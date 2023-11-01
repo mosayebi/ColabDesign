@@ -573,7 +573,7 @@ def get_parser():
         default=[],
         help="extra command line options to be passed in to the designability_test.py script."
         "As an example, for sampling with ESM2+MPNN at mppn_temp=0.2 and bias_temp=1.0 set\n"
-        "--extra_designability_opts esm2_priors  bias_temp=1.0 mpnn_temp=0.2"
+        "--extra_designability_opts esm2_priors  bias_temp=1.0 mpnn_temp=0.2 aa_bias=\"{\\'A\\':1.2,\\'V\\':-1}\""
     )
 
     return parser
