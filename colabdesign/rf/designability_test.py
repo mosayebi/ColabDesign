@@ -68,7 +68,7 @@ def main(argv):
   ag.add(["bias_npy="             ],       None,    str,   ["bias numpy array file"])
   ag.add(["decoding_order_npy="   ],       None,    str,   ["decoding_order numpy array file"])
   ag.add(["fasta="                ],       None,    str,   ["fasta file containing sequences to be assessed"])
-  ag.add(["aa_bias="              ],       None,    str,   ["json file containing user-defined aa biases as dict. e.g. \"{'A': -1.1, 'K': 0.7}\""])
+  ag.add(["aa_bias="              ],       None,    str,   ["user-defined aa biases as a dict. e.g. \"{'A': -1.1, 'K': 0.7}\""])
   ag.txt("-------------------------------------------------------------------------------------")
   o = ag.parse(argv)
 
@@ -125,34 +125,59 @@ def main(argv):
       pdb_filename = o.pdb
     else:
       pdb_filename = o.pdb.replace("_0.pdb",f"_{m}.pdb")
-    bias, decoding_order = None, None
+    bias, decoding_order = {}, {}
+
     if o.bias_npy is not None:
       print(f"using bias from '{o.bias_npy}'")
-      bias = np.load(o.bias_npy)
-    if o.decoding_order_npy is not None:
-      print(f"using decoding_order from '{o.decoding_order_npy}'")
-      decoding_order = np.load(o.decoding_order_npy)
-    if o.esm2_priors and (not None is [o.bias_npy, o.decoding_order_npy]):
-      if o.msa_transformer_priors:
-        raise RuntimeError("'msa_transformer_priors' and 'esm2_priors' cannot be enabled at the same time!")
+      bias = bias.update({'bias_npy': np.load(o.bias_npy)})
+
+    if o.esm2_priors:
+      # if o.msa_transformer_priors:
+      #   raise RuntimeError("'msa_transformer_priors' and 'esm2_priors' cannot be enabled at the same time!")
       if o.input_seq:
         seq = o.input_seq
       else:
         seq = ''.join(PDB.load(pdb_filename).get_seqs().values())
         print(f"input sequence for ESM2 priors inferred from the pdb file:\n{seq}")
-      bias, decoding_order = get_esm2_bias_and_decoding_order(seq, fixed_pos, device='cuda') # does not contain rm_aa biases
-    if o.msa_transformer_priors and (not None is [o.bias_npy, o.decoding_order_npy]):
-      if o.esm2_priors:
-        raise RuntimeError("'msa_transformer_priors' and 'esm2_priors' cannot be enabled at the same time!")
+      bias0, decoding_order0 = get_esm2_bias_and_decoding_order(seq, fixed_pos, device='cuda') # does not contain rm_aa biases
+      bias.update({'esm2_priors': bias0.copy()})
+      decoding_order.update({'esm2_decoding_order': decoding_order0.copy()})
+
+    if o.msa_transformer_priors:
+      # if o.esm2_priors:
+      #   raise RuntimeError("'msa_transformer_priors' and 'esm2_priors' cannot be enabled at the same time!")
       from protein_tools.msa import parse_a3m
       msa = parse_a3m(o.input_msa)
-      bias, decoding_order = get_msa_transformer_bias_and_decoding_order(msa, fixed_pos, device='cuda') # does not contain rm_aa biases
+      bias0, decoding_order0 = get_msa_transformer_bias_and_decoding_order(msa, fixed_pos, device='cuda') # does not contain rm_aa biases
+      bias.update({'msa_transformer_priors': bias0.copy()})
+      decoding_order.update({'msa_transformer_decoding_order': decoding_order0.copy()})
+
     if o.aa_bias is not None:
       aa_bias_dict = eval(o.aa_bias)
       print(f"aa biases are loaded as {aa_bias_dict}")
       seq_len = len(''.join(PDB.load(pdb_filename).get_seqs().values()))
-      bias = get_extra_aa_bias(aa_bias_dict, seq_len, bias)
-    bias_info.append((bias, decoding_order))
+      bias0 = get_extra_aa_bias(aa_bias_dict, seq_len, bias=None)
+      bias.update({'aa_bias': bias0.copy()})
+
+    if o.decoding_order_npy is not None:
+      print(f"decoding_order loaded from '{o.decoding_order_npy}'")
+      decoding_order = decoding_order.update({'decoding_order_npy':np.load(o.decoding_order_npy)})
+
+    if len(bias)==0:
+      tot_bias = None
+    elif len(bias)==1:
+      tot_bias = next(iter(bias.values()))
+    else:
+       print (f'summing up {list(bias.keys())} biases')
+       tot_bias = sum(bias.values())
+
+    tot_decoding_order = None
+    for k in ['decoding_order_npy', 'msa_transformer_decoding_order', 'esm2_decoding_order']:
+      if k in decoding_order:
+        tot_decoding_order = decoding_order[k]
+        print(f"decoding order is set to '{k}'")
+        break
+    bias_info.append((tot_bias, tot_decoding_order, bias, decoding_order))
 
 
   if sum(both_chains) == 0 and sum(fixed_chains) > 0 and sum(free_chains) > 0:
@@ -214,7 +239,7 @@ def main(argv):
 
 
       mpnn_model.get_af_inputs(af_model)
-      bias, decoding_order = bias_info[m]
+      bias, decoding_order, bias_terms, decoding_order_terms = bias_info[m]
       sampling_kws = {}
       msg = f"mpnn_temp={o.mpnn_temp}"
       if not bias is None:
@@ -239,6 +264,8 @@ def main(argv):
             total_bias=total_bias,
             bias=bias,
             decoding_order=decoding_order,
+            bias_terms=bias_terms,
+            decoding_order_terms=decoding_order_terms,
             mutation_sites=np.where(np.array(fixed_pos)==0)[0],
             kwargs=o,
           ), fn)

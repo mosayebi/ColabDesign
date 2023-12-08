@@ -324,8 +324,6 @@ def get_bias_and_decoding_order(weights: np.ndarray):
     decoding_order = np.argsort(entropy, axis=-1)[:, None]
     priors = _clip_p(priors)
     logits = np.log(priors / (1 - priors))
-    # logits[np.isneginf(logits)] = -BIG
-    # logits[np.isinf(logits)] = BIG
     return logits, decoding_order
 
 
@@ -418,7 +416,7 @@ def get_msa_transformer_bias_and_decoding_order(msa, fixed_pos, device="cpu"):
     clear_mem()
     return get_bias_and_decoding_order(esm_priors)
 
-def get_extra_aa_bias(aa_bias_dict, seq_len, bias):
+def get_extra_aa_bias(aa_bias_dict, seq_len, bias=None):
     aa_bias = np.zeros((seq_len, len(order_aa)))
     aa_bias_dict = {aa.upper(): b for aa, b in aa_bias_dict.items()}
     for i, aa in order_aa.items():
