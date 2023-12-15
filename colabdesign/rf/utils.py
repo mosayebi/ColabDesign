@@ -351,14 +351,14 @@ def _convert_mutation_probs(mutation, target_alphabet):
     return esm_priors
 
 
-def run_esm(esm_model, esm_alphabet, data, mutation_sites, device="cpu"):
+def run_esm(esm_model, esm_alphabet, data, mutation_sites, chunksize=10, device="cpu"):
     from protein_tools.mutation import ESMResidueMutation
 
     esm_model = esm_model.to(device).eval()
     mutation = (
         ESMResidueMutation(data, mutation_sites=mutation_sites)
         .mask_data(disable_tqdm=True)
-        .compute_logits(esm_model, esm_alphabet, disable_tqdm=True)
+        .compute_logits(esm_model, esm_alphabet, chunksize=chunksize, disable_tqdm=True)
         .process_logits()
     )
     return mutation
@@ -402,7 +402,7 @@ def get_msa_transformer_bias_and_decoding_order(msa, fixed_pos, device="cpu"):
     assert np.sum(mutation_sites<0) == 0, 'at least one mutation site is in the truncated msa region'
     esm_model, esm_alphabet = esm.pretrained.esm_msa1b_t12_100M_UR50S()
     esm_priors = _convert_mutation_probs(
-        run_esm(esm_model, esm_alphabet, [msa], mutation_sites, device=device), alphabet
+        run_esm(esm_model, esm_alphabet, [msa], mutation_sites, chunksize=1, device=device), alphabet
     )
     if offset > 0 :
       l, n = esm_priors.shape
