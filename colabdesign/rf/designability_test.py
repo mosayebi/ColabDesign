@@ -65,6 +65,7 @@ def main(argv):
   ag.add(["input_seq="            ],       None,    str,   ["input sequence for ESM2 priors calculation, if not given the sequence is taken from the input PDB"])
   ag.add(["msa_transformer_priors"],      False,   None,   ["enables ESM MSA Transformer priors"])
   ag.add(["input_msa="            ],      False,    str,   ["input msa file for MSA-Transformer priors calculation (format: .a3m)"])
+  ag.add(["max_msa_depth="        ],        500,    int,   ["max msa depth, default is 500"])
   ag.add(["bias_npy="             ],       None,    str,   ["bias numpy array file"])
   ag.add(["decoding_order_npy="   ],       None,    str,   ["decoding_order numpy array file"])
   ag.add(["fasta="                ],       None,    str,   ["fasta file containing sequences to be assessed"])
@@ -121,15 +122,15 @@ def main(argv):
   # work out biases
   bias_info = []
   for m in range(o.num_designs):
+    bias, decoding_order = {}, {}
     if o.num_designs == 0:
       pdb_filename = o.pdb
     else:
       pdb_filename = o.pdb.replace("_0.pdb",f"_{m}.pdb")
-    bias, decoding_order = {}, {}
 
     if o.bias_npy is not None:
       print(f"using bias from '{o.bias_npy}'")
-      bias = bias.update({'bias_npy': np.load(o.bias_npy)})
+      bias.update({'bias_npy': np.load(o.bias_npy)})
 
     if o.esm2_priors:
       # if o.msa_transformer_priors:
@@ -148,6 +149,9 @@ def main(argv):
       #   raise RuntimeError("'msa_transformer_priors' and 'esm2_priors' cannot be enabled at the same time!")
       from protein_tools.msa import parse_a3m
       msa = parse_a3m(o.input_msa)
+      if len(msa) > o.max_msa_depth:
+        print(f"input_msa is too deep. only considering the first max_msa_depth={o.max_msa_depth} alignments...")
+        msa = msa[:500]
       bias0, decoding_order0 = get_msa_transformer_bias_and_decoding_order(msa, fixed_pos, device='cuda') # does not contain rm_aa biases
       bias.update({'msa_transformer_priors': bias0.copy()})
       decoding_order.update({'msa_transformer_decoding_order': decoding_order0.copy()})
@@ -256,6 +260,7 @@ def main(argv):
                                     ))
 
       if o.save_logits:
+        Path(o.loc).mkdir(exist_ok=True, parents=True)
         fn = f"{o.loc}/logits_{m}.pkl"
         save_obj(
           dict(

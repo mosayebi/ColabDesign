@@ -333,21 +333,16 @@ def _convert_mutation_probs(mutation, target_alphabet):
     """
     ignore_tokens = [x for x in mutation.alphabet_tokens if x not in target_alphabet]
     assert len(mutation.alphabet_tokens) - len(ignore_tokens) == len(target_alphabet)
-    idxs = np.array(
-        [
-            j
-            for i, x in enumerate(target_alphabet)
-            for j, y in enumerate(mutation.alphabet_tokens)
-            if x == y
-        ]
-    )
+    idxs_map = np.array([mutation.alphabet.get_idx(a) for a in target_alphabet])
     seq = mutation.data[0][0][1] if mutation.is_msa else mutation.data[0][1]
+
     # fill positions other than mutation sites and the WT residues at fixed positions with zero
     esm_priors = np.zeros((len(seq), len(target_alphabet)))
-    for s, p in zip(mutation.mutation_sites, mutation.residue_probs[0][:, idxs]):
+    for s, p in zip(mutation.mutation_sites, mutation.residue_probs[0][:, idxs_map]):
         esm_priors[s, :] = p
     for idx, res in enumerate(seq):
-        esm_priors[idx, target_alphabet.index(res)] = 1
+        if idx not in mutation.mutation_sites:
+            esm_priors[idx, target_alphabet.index(res)] = 1
     return esm_priors
 
 
