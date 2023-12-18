@@ -339,6 +339,7 @@ def _convert_mutation_probs(mutation, target_alphabet):
         esm_priors[s, :] = p
     for i, res in enumerate(WT_seq):
         if i not in mutation.mutation_sites:
+            esm_priors[i, :] = 0
             esm_priors[i, target_alphabet.index(res)] = 1
     return esm_priors
 
