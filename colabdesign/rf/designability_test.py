@@ -17,6 +17,7 @@ from protein_tools.util import save_obj, load_obj
 from protein_tools.pdb import PDB
 from colabdesign.rf.utils import (get_esm2_bias_and_decoding_order,
                                   get_msa_transformer_bias_and_decoding_order,
+                                  get_frame2seq_bias_and_decoding_order,
                                   get_extra_aa_bias)
 
 
@@ -66,6 +67,7 @@ def main(argv):
   ag.add(["msa_transformer_priors"],      False,   None,   ["enables ESM MSA Transformer priors"])
   ag.add(["input_msa="            ],      False,    str,   ["input msa file for MSA-Transformer priors calculation (format: .a3m)"])
   ag.add(["max_msa_depth="        ],        500,    int,   ["max msa depth, default is 500"])
+  ag.add(["frame2seq_priors"      ],      False,   None,   ["enables Frame2seq priors"])
   ag.add(["bias_npy="             ],       None,    str,   ["bias numpy array file"])
   ag.add(["decoding_order_npy="   ],       None,    str,   ["decoding_order numpy array file"])
   ag.add(["fasta="                ],       None,    str,   ["fasta file containing sequences to be assessed"])
@@ -132,15 +134,19 @@ def main(argv):
       print(f"using bias from '{o.bias_npy}'")
       bias.update({'bias_npy': np.load(o.bias_npy)})
 
+    if o.frame2seq_priors:
+      bias0, decoding_order0 = get_frame2seq_bias_and_decoding_order(
+        pdb_filename, fixed_pos, copies=o.copies, device='cuda') # does not contain rm_aa biases
+      bias.update({'frame2seq_priors': bias0.copy()})
+      decoding_order.update({'frame2seq_decoding_order': decoding_order0.copy()})
+
     if o.esm2_priors:
-      # if o.msa_transformer_priors:
-      #   raise RuntimeError("'msa_transformer_priors' and 'esm2_priors' cannot be enabled at the same time!")
       if o.input_seq:
         seq = o.input_seq
       else:
         seq = ''.join(PDB.load(pdb_filename).get_seqs().values())
         print(f"input sequence for ESM2 priors inferred from the pdb file:\n{seq}")
-      bias0, decoding_order0 = get_esm2_bias_and_decoding_order(seq, fixed_pos, device='cuda') # does not contain rm_aa biases
+      bias0, decoding_order0 = get_esm2_bias_and_decoding_order(seq, fixed_pos, copies=o.copies, device='cuda') # does not contain rm_aa biases
       bias.update({'esm2_priors': bias0.copy()})
       decoding_order.update({'esm2_decoding_order': decoding_order0.copy()})
 
@@ -152,7 +158,7 @@ def main(argv):
       if len(msa) > o.max_msa_depth:
         print(f"input_msa is too deep. only considering the first max_msa_depth={o.max_msa_depth} alignments...")
         msa = msa[:500]
-      bias0, decoding_order0 = get_msa_transformer_bias_and_decoding_order(msa, fixed_pos, device='cuda') # does not contain rm_aa biases
+      bias0, decoding_order0 = get_msa_transformer_bias_and_decoding_order(msa, fixed_pos, copies=o.copies, device='cuda') # does not contain rm_aa biases
       bias.update({'msa_transformer_priors': bias0.copy()})
       decoding_order.update({'msa_transformer_decoding_order': decoding_order0.copy()})
 
@@ -176,7 +182,7 @@ def main(argv):
        tot_bias = sum(bias.values())
 
     tot_decoding_order = None
-    for k in ['decoding_order_npy', 'msa_transformer_decoding_order', 'esm2_decoding_order']:
+    for k in ['decoding_order_npy', 'msa_transformer_decoding_order', 'esm2_decoding_order', 'frame2seq_decoding_order']:
       if k in decoding_order:
         tot_decoding_order = decoding_order[k]
         print(f"decoding order is set to '{k}'")

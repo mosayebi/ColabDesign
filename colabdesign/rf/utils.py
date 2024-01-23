@@ -11,6 +11,8 @@ from colabdesign.shared.model import order_aa
 from colabdesign.shared.utils import clear_mem
 from torch.cuda import empty_cache
 
+def to_np(x):
+   return x.detach().cpu().numpy()
 
 def sym_it(coords, center, cyclic_symmetry_axis, reflection_axis=None):
     def rotation_matrix(axis, theta):
@@ -326,6 +328,8 @@ def get_bias_and_decoding_order(weights: np.ndarray):
     logits = np.log(priors / (1 - priors))
     return logits, decoding_order
 
+def symmetrise_logits(logits:np.ndarray, copies=1):
+    return np.tile(logits.reshape(copies, logits.shape[0]//copies,-1).mean(0), (copies,1))
 
 def _convert_mutation_probs(mutation, target_alphabet):
     """convert probs from mutation object to correctly ordered priors, filling out positions other than mutations sites.
@@ -357,7 +361,7 @@ def run_esm(esm_model, esm_alphabet, data, mutation_sites, chunksize=10, device=
     return mutation
 
 
-def get_esm2_bias_and_decoding_order(seq, fixed_pos, device="cpu"):
+def get_esm2_bias_and_decoding_order(seq, fixed_pos, copies=1, device="cpu"):
     import esm
 
     print("running ESM2...")
@@ -372,10 +376,11 @@ def get_esm2_bias_and_decoding_order(seq, fixed_pos, device="cpu"):
     del esm_model, esm
     empty_cache()
     clear_mem()
-    return get_bias_and_decoding_order(esm_priors)
+    logits, decoding_order = get_bias_and_decoding_order(esm_priors)
+    return symmetrise_logits(logits, copies), decoding_order
 
 
-def get_msa_transformer_bias_and_decoding_order(msa, fixed_pos, device="cpu"):
+def get_msa_transformer_bias_and_decoding_order(msa, fixed_pos, copies=1, device="cpu"):
     import esm
 
     print("running ESM MSA-Transformer...")
@@ -407,7 +412,58 @@ def get_msa_transformer_bias_and_decoding_order(msa, fixed_pos, device="cpu"):
     del esm_model, esm
     empty_cache()
     clear_mem()
-    return get_bias_and_decoding_order(esm_priors)
+    logits, decoding_order = get_bias_and_decoding_order(esm_priors)
+    return symmetrise_logits(logits, copies), decoding_order
+
+
+def get_frame2seq_bias_and_decoding_order(
+    pdb_path,
+    fixed_pos,
+    copies=1,
+    chain_id=None,
+    device="cuda",
+    target_alphabet=list(order_aa.values()),
+):
+    import torch
+    from protein_tools.pdb import PDB
+    from frame2seq import Frame2seqRunner
+    from frame2seq.utils import residue_constants
+    from frame2seq.utils.pdb2input import get_inference_inputs
+
+    print("running frame2seq...")
+    seqs = PDB.load(pdb_path).get_seqs()
+    chain_ids = [chain_id] if chain_id is not None and isinstance(chain_id, str) else list(seqs.keys())
+    if len(seqs) > 1:
+        print(
+            f"concatenating features from chain_id={chain_ids} (`frame2seq` supports single-chain structures)"
+        )
+
+    runner = Frame2seqRunner(device=device)
+    fixed_positions = np.where(np.array(fixed_pos) != 0)[0]
+
+    # concatenate features for multi-chain structures
+    features = [[x.to(device) for x in get_inference_inputs(pdb_path, c)] for c in chain_ids]
+    seq_mask, aatype, X = [torch.concat([f[i] for f in features], dim=1) for i in range(len(features[0]))]
+
+    input_aatype_onehot = torch.zeros(tuple(aatype.shape)+(len(residue_constants.ID_TO_AA),), device=device)
+    input_aatype_onehot[:, :, 20] = 1  # all positions are masked (set to unknown)
+    for pos in fixed_positions:
+        input_aatype_onehot[:, pos, :] = 0
+        input_aatype_onehot[:, pos, aatype[0][pos]] = 1  # fixed positions set to the input sequence
+
+    with torch.no_grad():
+        pred_seq1 = runner.models[0].forward(X, seq_mask, input_aatype_onehot)
+        pred_seq2 = runner.models[1].forward(X, seq_mask, input_aatype_onehot)
+        pred_seq3 = runner.models[2].forward(X, seq_mask, input_aatype_onehot)
+        logits = (pred_seq1 + pred_seq2 + pred_seq3) / 3  # ensemble
+        entropy = - (logits.softmax(-1)*logits.log_softmax(-1)).sum(-1)
+        decoding_order = entropy[0].argsort(-1)
+
+    alphabet = list(residue_constants.ID_TO_AA.values())
+    idxs_map = torch.tensor([alphabet.index(a) for a in target_alphabet])
+    logits, decoding_order = to_np(logits[0, :, idxs_map]), to_np(decoding_order[:, None])
+    return symmetrise_logits(logits, copies), decoding_order
+
 
 def get_extra_aa_bias(aa_bias_dict, seq_len, bias=None):
     aa_bias = np.zeros((seq_len, len(order_aa)))
