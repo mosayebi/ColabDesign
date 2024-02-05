@@ -115,8 +115,9 @@ def fix_partial_contigs(contigs, parsed_pdb):
         if L > 0:
             new_contig.append(f"{seen[0][0]}{seen[0][1]}-{seen[-1][1]}")
         new_contigs.append("/".join(new_contig))
-    print("manual fix", new_contigs, "to", new_contigs[0:1])
-    return new_contigs[0:1]
+    fixed_contigs = list(set(new_contigs)) # manually remove duplicates in the case of symmetric contigs
+    print("WARNNING! fixed contigs:\noriginal:\t{new_contigs}\nfixed:   \t{fixed_contigs}")
+    return fixed_contigs
 
 
 def fix_contigs(contigs, parsed_pdb):

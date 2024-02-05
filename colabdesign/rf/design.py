@@ -526,7 +526,7 @@ def get_parser():
     parser.add_argument(
         "--initial_guess",
         action="store_true",
-        default=True,
+        default=False,
         help="Uses the input PDB coordinates as an initial guess in AlphaFold prediction (similar to the coordinate input from previous recycle). "
         "Note that this is a weak restraint, as the model was trained in the regime where coordinates form previous recycle maybe incorrect. "
         "While `initial_guess` is a weak restraint, using templates is considered a strong one. For templates, the strength of the template restraint is "
