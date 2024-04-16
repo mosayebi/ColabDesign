@@ -18,7 +18,8 @@ from protein_tools.pdb import PDB
 from colabdesign.rf.utils import (get_esm2_bias_and_decoding_order,
                                   get_msa_transformer_bias_and_decoding_order,
                                   get_frame2seq_bias_and_decoding_order,
-                                  get_extra_aa_bias)
+                                  get_extra_aa_bias,
+                                  get_ligand_mpnn_logits_and_decoding_order)
 
 
 def get_info(contig):
@@ -39,6 +40,8 @@ def get_info(contig):
 
 
 def main(argv):
+  ligand_mpnn_args = f"--model_type ligand_mpnn --single_aa_score 1  --use_sequence 1  --batch_size 1 --number_of_batches 100"
+
   ag = parse_args()
   ag.txt("-------------------------------------------------------------------------------------")
   ag.txt("Designability Test")
@@ -61,17 +64,22 @@ def main(argv):
   ag.add(["num_designs="          ],          1,    int,   ["number of designs to evaluate"])
   ag.add(["mpnn_temp="            ],        0.1,  float,   ["sampling temperature used by proteinMPNN"])
   ag.add(["bias_temp="            ],        1.0,  float,   ["sampling temperature used to scale bias"])
-  ag.add(["save_logits"           ],      False,   None,   ["save logits"])
-  ag.add(["esm2_priors"           ],      False,   None,   ["enables ESM2 priors"])
+  ag.add(["ligand_mpnn_temp="     ],        0.1,  float,   ["sampling temperature used to scale ligand_mpnn logits"])
+  ag.add(["ligand_mpnn"           ],      False,   None,   ["enables ligand_mpnn priors"])
+  ag.add(["ligand_mpnn_pdb="      ],      False,    str,   ["input pdb file with ligands for the ligand_mpnn model"])
+  ag.add(["esm2_bias"             ],      False,   None,   ["enables ESM2 priors"])
   ag.add(["input_seq="            ],       None,    str,   ["input sequence for ESM2 priors calculation, if not given the sequence is taken from the input PDB"])
-  ag.add(["msa_transformer_priors"],      False,   None,   ["enables ESM MSA Transformer priors"])
-  ag.add(["input_msa="            ],      False,    str,   ["input msa file for MSA-Transformer priors calculation (format: .a3m)"])
+  ag.add(["msa_transformer_bias"  ],      False,   None,   ["enables ESM MSA Transformer priors"])
+  ag.add(["input_msa="            ],       None,    str,   ["input msa file for MSA-Transformer priors calculation (format: .a3m)"])
   ag.add(["max_msa_depth="        ],        500,    int,   ["max msa depth, default is 500"])
-  ag.add(["frame2seq_priors"      ],      False,   None,   ["enables Frame2seq priors"])
+  ag.add(["frame2seq_bias"        ],      False,   None,   ["enables Frame2seq priors"])
   ag.add(["bias_npy="             ],       None,    str,   ["bias numpy array file"])
   ag.add(["decoding_order_npy="   ],       None,    str,   ["decoding_order numpy array file"])
-  ag.add(["fasta="                ],       None,    str,   ["fasta file containing sequences to be assessed"])
   ag.add(["aa_bias="              ],       None,    str,   ["user-defined aa biases as a dict. e.g. \"{'A': -1.1, 'K': 0.7}\""])
+  ag.add(["save_logits"           ],      False,   None,   ["save logits"])
+  ag.add(["ligand_mpnn_args="     ],ligand_mpnn_args, str, ["(ligand_mpnn) score.py arguments. default: `{ligand_mpnn_args}`"])
+  ag.add(["fasta="                ],       None,    str,   ["fasta file containing sequences to be assessed"])
+
   ag.txt("-------------------------------------------------------------------------------------")
   o = ag.parse(argv)
 
@@ -122,7 +130,7 @@ def main(argv):
            "model_names":["model_1_multimer_v3" if o.use_multimer else "model_1_ptm"]}
 
   # work out biases
-  bias_info = []
+  bias_info, lmpnn_info = [], []
   for m in range(o.num_designs):
     bias, decoding_order = {}, {}
     if o.num_designs == 0:
@@ -130,36 +138,45 @@ def main(argv):
     else:
       pdb_filename = o.pdb.replace("_0.pdb",f"_{m}.pdb")
 
+    if o.ligand_mpnn:
+      bias0, decoding_order0 = get_ligand_mpnn_logits_and_decoding_order(
+                                input_pdb=o.ligand_mpnn_pdb,
+                                out_folder=f"{o.loc}/ligand_mpnn/{m}",
+                                args_str=o.ligand_mpnn_args,
+                                copies=o.copies)
+      lmpnn_info.append(bias0.copy())
+      decoding_order.update({'ligand_mpnn_decoding_order': decoding_order0.copy()})
+    else:
+      lmpnn_info.append(None)
+
     if o.bias_npy is not None:
       print(f"using bias from '{o.bias_npy}'")
       bias.update({'bias_npy': np.load(o.bias_npy)})
 
-    if o.frame2seq_priors:
+    if o.frame2seq_bias:
       bias0, decoding_order0 = get_frame2seq_bias_and_decoding_order(
         pdb_filename, fixed_pos, copies=o.copies, device='cuda') # does not contain rm_aa biases
-      bias.update({'frame2seq_priors': bias0.copy()})
+      bias.update({'frame2seq_bias': bias0.copy()})
       decoding_order.update({'frame2seq_decoding_order': decoding_order0.copy()})
 
-    if o.esm2_priors:
+    if o.esm2_bias:
       if o.input_seq:
         seq = o.input_seq
       else:
         seq = ''.join(PDB.load(pdb_filename).get_seqs().values())
         print(f"input sequence for ESM2 priors inferred from the pdb file:\n{seq}")
       bias0, decoding_order0 = get_esm2_bias_and_decoding_order(seq, fixed_pos, copies=o.copies, device='cuda') # does not contain rm_aa biases
-      bias.update({'esm2_priors': bias0.copy()})
+      bias.update({'esm2_bias': bias0.copy()})
       decoding_order.update({'esm2_decoding_order': decoding_order0.copy()})
 
-    if o.msa_transformer_priors:
-      # if o.esm2_priors:
-      #   raise RuntimeError("'msa_transformer_priors' and 'esm2_priors' cannot be enabled at the same time!")
+    if o.msa_transformer_bias:
       from protein_tools.msa import parse_a3m
       msa = parse_a3m(o.input_msa)
       if len(msa) > o.max_msa_depth:
         print(f"input_msa is too deep. only considering the first max_msa_depth={o.max_msa_depth} alignments...")
-        msa = msa[:500]
+        msa = msa[:o.max_msa_depth]
       bias0, decoding_order0 = get_msa_transformer_bias_and_decoding_order(msa, fixed_pos, copies=o.copies, device='cuda') # does not contain rm_aa biases
-      bias.update({'msa_transformer_priors': bias0.copy()})
+      bias.update({'msa_transformer_bias': bias0.copy()})
       decoding_order.update({'msa_transformer_decoding_order': decoding_order0.copy()})
 
     if o.aa_bias is not None:
@@ -182,7 +199,11 @@ def main(argv):
        tot_bias = sum(bias.values())
 
     tot_decoding_order = None
-    for k in ['decoding_order_npy', 'msa_transformer_decoding_order', 'esm2_decoding_order', 'frame2seq_decoding_order']:
+    for k in ['decoding_order_npy',
+              'msa_transformer_decoding_order',
+              'esm2_decoding_order',
+              'frame2seq_decoding_order',
+              'ligand_mpnn_decoding_order']:
       if k in decoding_order:
         tot_decoding_order = decoding_order[k]
         print(f"decoding order is set to '{k}'")
@@ -250,12 +271,18 @@ def main(argv):
 
       mpnn_model.get_af_inputs(af_model)
       bias, decoding_order, bias_terms, decoding_order_terms = bias_info[m]
+      lmpnn_logits = lmpnn_info[m]
       sampling_kws = {}
       msg = f"mpnn_temp={o.mpnn_temp}"
+      total_bias = mpnn_model._inputs['bias'].copy() * o.mpnn_temp # to include rm_aa/fixed_pos biases in ._input['bias']
+      if not lmpnn_logits is None:
+        msg += (f", ligand_mpnn_temp={o.ligand_mpnn_temp}")
+        total_bias += lmpnn_logits * o.mpnn_temp / o.ligand_mpnn_temp
+        sampling_kws.update({'bias': total_bias.copy()})
       if not bias is None:
-        total_bias = mpnn_model._inputs['bias'] + bias    # to include rm_aa/fixed_pos biases in ._input['bias']
         msg += (f", bias_temp={o.bias_temp}")
-        sampling_kws.update({'bias': total_bias.copy() * o.mpnn_temp / o.bias_temp})
+        total_bias += bias * o.mpnn_temp / o.bias_temp
+        sampling_kws.update({'bias': total_bias.copy()})
       if not decoding_order is None:
         sampling_kws.update({'decoding_order': decoding_order.copy()})
       print(f"[{Path(pdb_filename).stem}] sampling at {msg}")
@@ -274,6 +301,7 @@ def main(argv):
             mpnn_unconditional_logits=mpnn_model.get_unconditional_logits(),
             total_bias=total_bias,
             bias=bias,
+            ligand_mpnn_logits=lmpnn_logits,
             decoding_order=decoding_order,
             bias_terms=bias_terms,
             decoding_order_terms=decoding_order_terms,

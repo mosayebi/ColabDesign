@@ -3,13 +3,13 @@ import matplotlib.pyplot as plt
 from matplotlib import animation
 from colabdesign.shared.plot import plot_pseudo_3D, pymol_cmap, _np_kabsch
 from string import ascii_uppercase, ascii_lowercase
-
-alphabet_list = list(ascii_uppercase + ascii_lowercase)
 import numpy as np
-
 from colabdesign.shared.model import order_aa
 from colabdesign.shared.utils import clear_mem
 from torch.cuda import empty_cache
+from pathlib import Path
+
+alphabet_list = list(ascii_uppercase + ascii_lowercase)
 
 def to_np(x):
    return x.detach().cpu().numpy()
@@ -472,3 +472,45 @@ def get_extra_aa_bias(aa_bias_dict, seq_len, bias=None):
     for i, aa in order_aa.items():
         aa_bias[:, i] = aa_bias_dict.get(aa, 0)
     return aa_bias if bias is None else bias+aa_bias
+
+def get_ligand_mpnn_logits_and_decoding_order(
+    input_pdb,
+    out_folder,
+    args_str,
+    copies=1,
+    score_py=None,
+    target_alphabet=list(order_aa.values()),
+):
+    from ligandmpnn import ROOT
+    import subprocess
+    import torch
+
+    print("running LigandMPNN...")
+
+    if score_py is None:
+        score_py = ROOT / "scripts/score.py"
+
+    command = f"python {score_py}  --pdb_path {input_pdb} --out_folder {out_folder} {args_str}"
+    process = subprocess.Popen(
+        command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=True
+    )
+    stdout, stderr = process.communicate()
+    with open(f"{out_folder}/stderr", "wb") as f:
+        f.write(stderr)
+        if stderr != b"":
+            print(stderr.decode())
+    with open(f"{out_folder}/stdout", "wb") as f:
+        f.write(stdout)
+    with open(f"{out_folder}/command", "w") as f:
+        f.write(command)
+
+    name = Path(f"{input_pdb}").stem
+    path = Path(f"{out_folder}/{name}.pt")
+    x = torch.load(path)
+    alphabet = x["alphabet"]
+    logits = torch.from_numpy(x["logits"].mean(0))
+    entropy = -(logits.softmax(-1) * logits.log_softmax(-1)).sum(-1)
+    decoding_order = entropy.argsort(-1)
+    idxs_map = torch.tensor([alphabet.index(a) for a in target_alphabet])
+    logits, decoding_order = to_np(logits[:, idxs_map]), to_np(decoding_order[:, None])
+    return symmetrise_logits(logits, copies), decoding_order

@@ -28,7 +28,9 @@ class parse_args:
           else: x["value"] = x["type"](arg)
 
     opts = {x["key"]:x["value"] for x in self.info}
-    print(str(opts).replace(" ",""))
+    for k, v in opts.items():
+      print(f"{k}: {v}")
+    print('-'*80)
     return dict2obj(opts)
 
   def usage(self, err):
