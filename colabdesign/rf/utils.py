@@ -495,6 +495,7 @@ def get_ligand_mpnn_logits_and_decoding_order(
         command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=True
     )
     stdout, stderr = process.communicate()
+    Path(out_folder).mkdir(exist_ok=True, parents=True)
     with open(f"{out_folder}/stderr", "wb") as f:
         f.write(stderr)
         if stderr != b"":
@@ -513,4 +514,51 @@ def get_ligand_mpnn_logits_and_decoding_order(
     decoding_order = entropy.argsort(-1)
     idxs_map = torch.tensor([alphabet.index(a) for a in target_alphabet])
     logits, decoding_order = to_np(logits[:, idxs_map]), to_np(decoding_order[:, None])
+    return symmetrise_logits(logits, copies), decoding_order
+
+
+def get_saprot_bias_and_decoding_order(
+    pdb_path,
+    fixed_pos,
+    copies=1,
+    device="cuda",
+    chain_id=None,
+    target_alphabet=list(order_aa.values()),
+):
+
+    print("running SaProt...")
+    import saprot
+    from saprot.utils.foldseek_util import get_struc_seq
+    from saprot.utils.constants import aa_list
+    from saprot.model.saprot.saprot_foldseek_mutation_model import SaprotFoldseekMutationModel
+    from protein_tools.pdb import PDB
+
+    seqs = PDB.load(pdb_path).get_seqs()
+    chain_ids = [chain_id] if chain_id is not None and isinstance(chain_id, str) else list(seqs.keys())
+
+    DIR = Path(saprot.__file__).parent.parent
+    config = {
+    "foldseek_path": DIR / "bin/foldseek",
+    "config_path": DIR / "weights/PLMs/SaProt_650M_AF2",
+    "load_pretrained": True,
+    }
+
+    parsed_seqs = get_struc_seq(
+        config['foldseek_path'],
+        pdb_path, chain_ids
+    )
+
+    if len(parsed_seqs)>1:
+        print('PDB has more than one chain. concatenating the sequence ...')
+    seq = ''.join([x[0] for x in parsed_seqs.values()])
+    combined_seq = ''.join([x[-1] for x in parsed_seqs.values()])
+    print(f"SaProt combined sequence:\n{combined_seq}\n")
+
+    model = SaprotFoldseekMutationModel(**config)
+    model.eval()
+    model.to(device)
+    priors = np.stack([list(model.predict_pos_prob(combined_seq, resid).values()) for resid in range(1,1+len(seq))])
+    logits, decoding_order = get_bias_and_decoding_order(priors)
+    idxs_map = np.array([aa_list.index(a) for a in target_alphabet])
+    logits = logits[:, idxs_map]
     return symmetrise_logits(logits, copies), decoding_order

@@ -19,7 +19,8 @@ from colabdesign.rf.utils import (get_esm2_bias_and_decoding_order,
                                   get_msa_transformer_bias_and_decoding_order,
                                   get_frame2seq_bias_and_decoding_order,
                                   get_extra_aa_bias,
-                                  get_ligand_mpnn_logits_and_decoding_order)
+                                  get_ligand_mpnn_logits_and_decoding_order,
+                                  get_saprot_bias_and_decoding_order)
 
 
 def get_info(contig):
@@ -40,7 +41,7 @@ def get_info(contig):
 
 
 def main(argv):
-  ligand_mpnn_args = f"--model_type ligand_mpnn --single_aa_score 1  --use_sequence 1  --batch_size 1 --number_of_batches 100"
+  ligand_mpnn_args = f"--model_type ligand_mpnn --single_aa_score 1  --use_sequence 1  --batch_size 1 --number_of_batches 250"
 
   ag = parse_args()
   ag.txt("-------------------------------------------------------------------------------------")
@@ -73,6 +74,7 @@ def main(argv):
   ag.add(["input_msa="            ],       None,    str,   ["input msa file for MSA-Transformer priors calculation (format: .a3m)"])
   ag.add(["max_msa_depth="        ],        500,    int,   ["max msa depth, default is 500"])
   ag.add(["frame2seq_bias"        ],      False,   None,   ["enables Frame2seq priors"])
+  ag.add(["saprot_bias"           ],      False,   None,   ["enables SaProt priors"])
   ag.add(["bias_npy="             ],       None,    str,   ["bias numpy array file"])
   ag.add(["decoding_order_npy="   ],       None,    str,   ["decoding_order numpy array file"])
   ag.add(["aa_bias="              ],       None,    str,   ["user-defined aa biases as a dict. e.g. \"{'A': -1.1, 'K': 0.7}\""])
@@ -159,6 +161,12 @@ def main(argv):
       bias.update({'frame2seq_bias': bias0.copy()})
       decoding_order.update({'frame2seq_decoding_order': decoding_order0.copy()})
 
+    if o.saprot_bias:
+      bias0, decoding_order0 = get_saprot_bias_and_decoding_order(
+        pdb_filename, fixed_pos, copies=o.copies, device='cuda') # does not contain rm_aa biases
+      bias.update({'saprot_bias': bias0.copy()})
+      decoding_order.update({'saprot_decoding_order': decoding_order0.copy()})
+
     if o.esm2_bias:
       if o.input_seq:
         seq = o.input_seq
@@ -203,7 +211,8 @@ def main(argv):
               'msa_transformer_decoding_order',
               'esm2_decoding_order',
               'frame2seq_decoding_order',
-              'ligand_mpnn_decoding_order']:
+              'ligand_mpnn_decoding_order',
+              'saprot_decoding_order']:
       if k in decoding_order:
         tot_decoding_order = decoding_order[k]
         print(f"decoding order is set to '{k}'")
