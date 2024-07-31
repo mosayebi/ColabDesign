@@ -78,7 +78,7 @@ def main(argv):
   ag.add(["bias_npy="             ],       None,    str,   ["bias numpy array file"])
   ag.add(["decoding_order_npy="   ],       None,    str,   ["decoding_order numpy array file"])
   ag.add(["aa_bias="              ],       None,    str,   ["user-defined aa biases as a dict. e.g. \"{'A': -1.1, 'K': 0.7}\""])
-  ag.add(["save_logits"           ],      False,   None,   ["save logits"])
+  ag.add(["save_logits"           ],       False,  None,   ["save logits"])
   ag.add(["ligand_mpnn_args="     ],ligand_mpnn_args, str, ["(ligand_mpnn) score.py arguments. default: `{ligand_mpnn_args}`"])
   ag.add(["fasta="                ],       None,    str,   ["fasta file containing sequences to be assessed"])
 

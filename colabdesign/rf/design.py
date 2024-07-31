@@ -433,7 +433,7 @@ def run_sampling(args):
         opts = [
             f"--pdb=outputs/{path}_0.pdb",
             f"--loc=outputs/{path}",
-            f"--contig={contigs_str}",
+            f"--contigs={contigs_str}",
             f"--copies={copies}",
             f"--num_seqs={num_seqs}",
             f"--num_recycles={num_recycles}",
