@@ -349,29 +349,31 @@ def _convert_mutation_probs(mutation, target_alphabet):
     return esm_priors
 
 
-def run_esm(esm_model, esm_alphabet, data, mutation_sites, chunksize=10, device="cpu"):
+def run_esm(esm_model, esm_alphabet, data, mutation_sites, chunksize=10, device="cuda", disable_tqdm=True):
     from protein_tools.mutation import ESMResidueMutation
-
     esm_model = esm_model.to(device).eval()
     mutation = (
         ESMResidueMutation(data, mutation_sites=mutation_sites)
-        .mask_data(disable_tqdm=True)
-        .compute_logits(esm_model, esm_alphabet, chunksize=chunksize, disable_tqdm=True)
+        .mask_data(disable_tqdm=disable_tqdm)
+        .compute_logits(esm_model, esm_alphabet, chunksize=chunksize, disable_tqdm=disable_tqdm)
         .process_logits()
     )
     return mutation
 
 
-def get_esm2_bias_and_decoding_order(seq, fixed_pos, copies=1, device="cpu"):
-    import esm
+def get_esm2_bias_and_decoding_order(seq, fixed_pos, copies=1, device="cuda"):
+    return get_esm_bias_and_decoding_order(seq, fixed_pos, copies=copies, device=device, model_name='esm2_t36_3B_UR50D')
 
-    print("running ESM2...")
+
+def get_esm_bias_and_decoding_order(seq, fixed_pos, copies=1, device="cuda", model_name='esm2_t36_3B_UR50D', **kwargs):
+    import esm
+    print(f"running {model_name} ...")
     alphabet = list(order_aa.values())
     mutation_sites = np.where(np.array(fixed_pos) == 0)[0]
     assert len(fixed_pos) == len(seq)
-    esm_model, esm_alphabet = esm.pretrained.esm2_t36_3B_UR50D()
+    esm_model, esm_alphabet = getattr(esm.pretrained, model_name)()
     esm_priors = _convert_mutation_probs(
-        run_esm(esm_model, esm_alphabet, [("seq", seq)], mutation_sites, device=device),
+        run_esm(esm_model, esm_alphabet, [("seq", seq)], mutation_sites, device=device, **kwargs),
         alphabet,
     )
     del esm_model, esm
@@ -381,10 +383,10 @@ def get_esm2_bias_and_decoding_order(seq, fixed_pos, copies=1, device="cpu"):
     return symmetrise_logits(logits, copies), decoding_order
 
 
-def get_msa_transformer_bias_and_decoding_order(msa, fixed_pos, copies=1, device="cpu"):
+def get_msa_transformer_bias_and_decoding_order(msa, fixed_pos, copies=1, device="cuda", verbose=True, **kwargs):
     import esm
 
-    print("running ESM MSA-Transformer...")
+    if verbose: print("running ESM MSA-Transformer...")
     alphabet = list(order_aa.values())
     mutation_sites = np.where(np.array(fixed_pos) == 0)[0]
 
@@ -401,7 +403,7 @@ def get_msa_transformer_bias_and_decoding_order(msa, fixed_pos, copies=1, device
     assert np.sum(mutation_sites<0) == 0, 'at least one mutation site is in the truncated msa region'
     esm_model, esm_alphabet = esm.pretrained.esm_msa1b_t12_100M_UR50S()
     esm_priors = _convert_mutation_probs(
-        run_esm(esm_model, esm_alphabet, [msa], mutation_sites, chunksize=1, device=device), alphabet
+        run_esm(esm_model, esm_alphabet, [msa], mutation_sites, chunksize=1, device=device), alphabet, **kwargs
     )
     if offset > 0 :
       l, n = esm_priors.shape

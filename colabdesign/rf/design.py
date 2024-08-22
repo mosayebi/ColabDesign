@@ -412,6 +412,7 @@ def run_sampling(args):
                 flags[k] = v.replace("'", "").replace('"', "")
 
         contigs, copies = run_diffusion(**flags)
+        #copies=1
 
         print(f"RFdiffusion done ({name})!")
         print(datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
