@@ -41,7 +41,7 @@ def get_info(contig):
 
 
 def main(argv):
-  ligand_mpnn_args = f"--model_type ligand_mpnn --single_aa_score 1  --use_sequence 1  --batch_size 1 --number_of_batches 250"
+  ligand_mpnn_args = f"--model_type ligand_mpnn --single_aa_score 1  --use_sequence 1  --batch_size 1 --number_of_batches 50"
 
   ag = parse_args()
   ag.txt("-------------------------------------------------------------------------------------")

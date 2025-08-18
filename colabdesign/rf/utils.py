@@ -478,7 +478,7 @@ def get_extra_aa_bias(aa_bias_dict, seq_len, bias=None):
 def get_ligand_mpnn_logits_and_decoding_order(
     input_pdb,
     out_folder,
-    args_str="--model_type ligand_mpnn --single_aa_score 1  --use_sequence 1  --batch_size 1 --number_of_batches 250",
+    args_str="--model_type ligand_mpnn --single_aa_score 1  --use_sequence 1  --batch_size 1 --number_of_batches 50",
     copies=1,
     score_py=None,
     target_alphabet=list(order_aa.values()),
