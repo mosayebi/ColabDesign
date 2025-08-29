@@ -509,7 +509,7 @@ def get_ligand_mpnn_logits_and_decoding_order(
 
     name = Path(f"{input_pdb}").stem
     path = Path(f"{out_folder}/{name}.pt")
-    x = torch.load(path)
+    x = torch.load(path, map_location="cpu", weights_only=False)
     alphabet = x["alphabet"]
     logits = torch.from_numpy(x["logits"].mean(0))
     entropy = -(logits.softmax(-1) * logits.log_softmax(-1)).sum(-1)
