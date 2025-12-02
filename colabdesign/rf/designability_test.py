@@ -226,8 +226,8 @@ def main(argv):
               ls_ = []
               for _ in range(3):
                 for _s in range(o.e1_num_seeds):
-                  context = sample_from_msa(o.input_msa, max_token_length=o.e1_context_max_tokens/(3-_))
-                  print(f"[{_}_{_s}] max_tokens={o.e1_context_max_tokens/(3-_)}: sampled context contains {context.count(',')} sequences.")
+                  context = sample_from_msa(o.input_msa, max_token_length=o.e1_context_max_tokens//(3-_))
+                  print(f"[{_}_{_s}] max_tokens={o.e1_context_max_tokens//(3-_)}: sampled context contains {context.count(',')} sequences.")
                   bias0, decoding_order0 = get_e1_bias_and_decoding_order(
                     seq, fixed_pos, context=context, copies=o.copies, model_name=o.e1_model_name,
                   )
