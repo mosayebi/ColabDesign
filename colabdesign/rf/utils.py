@@ -8,11 +8,15 @@ from colabdesign.shared.model import order_aa
 from colabdesign.shared.utils import clear_mem
 from torch.cuda import empty_cache
 from pathlib import Path
+from scipy.special import softmax, logsumexp
+import torch
 
 alphabet_list = list(ascii_uppercase + ascii_lowercase)
 
+
 def to_np(x):
-   return x.detach().cpu().numpy()
+    return x.detach().cpu().numpy()
+
 
 def sym_it(coords, center, cyclic_symmetry_axis, reflection_axis=None):
     def rotation_matrix(axis, theta):
@@ -115,8 +119,12 @@ def fix_partial_contigs(contigs, parsed_pdb):
         if L > 0:
             new_contig.append(f"{seen[0][0]}{seen[0][1]}-{seen[-1][1]}")
         new_contigs.append("/".join(new_contig))
-    fixed_contigs = list(set(new_contigs)) # manually remove duplicates in the case of symmetric contigs
-    print("WARNNING! fixed contigs:\noriginal:\t{new_contigs}\nfixed:   \t{fixed_contigs}")
+    fixed_contigs = list(
+        set(new_contigs)
+    )  # manually remove duplicates in the case of symmetric contigs
+    print(
+        "WARNNING! fixed contigs:\noriginal:\t{new_contigs}\nfixed:   \t{fixed_contigs}"
+    )
     return fixed_contigs
 
 
@@ -302,8 +310,6 @@ def make_animation(pos, plddt=None, Ls=None, ref=0, line_w=2.0, dpi=100):
     return ani.to_html5_video()
 
 
-
-
 def get_priors_and_entropy(weights: np.ndarray):
     """Returns normalised priors and their entropy.cAt columns where normalised priors are all zero entropy is set to -1."""
     assert np.all(weights >= 0)
@@ -329,8 +335,12 @@ def get_bias_and_decoding_order(weights: np.ndarray):
     logits = np.log(priors / (1 - priors))
     return logits, decoding_order
 
-def symmetrise_logits(logits:np.ndarray, copies=1):
-    return np.tile(logits.reshape(copies, logits.shape[0]//copies,-1).mean(0), (copies,1))
+
+def symmetrise_logits(logits: np.ndarray, copies=1):
+    return np.tile(
+        logits.reshape(copies, logits.shape[0] // copies, -1).mean(0), (copies, 1)
+    )
+
 
 def _convert_mutation_probs(mutation, target_alphabet):
     """convert probs from mutation object to correctly ordered priors, filling out positions other than mutations sites.
@@ -349,31 +359,54 @@ def _convert_mutation_probs(mutation, target_alphabet):
     return esm_priors
 
 
-def run_esm(esm_model, esm_alphabet, data, mutation_sites, chunksize=10, device="cuda", disable_tqdm=True):
+def run_esm(
+    esm_model,
+    esm_alphabet,
+    data,
+    mutation_sites,
+    chunksize=10,
+    device="cuda",
+    disable_tqdm=True,
+):
     from protein_tools.mutation import ESMResidueMutation
+
     esm_model = esm_model.to(device).eval()
     mutation = (
         ESMResidueMutation(data, mutation_sites=mutation_sites)
         .mask_data(disable_tqdm=disable_tqdm)
-        .compute_logits(esm_model, esm_alphabet, chunksize=chunksize, disable_tqdm=disable_tqdm)
+        .compute_logits(
+            esm_model, esm_alphabet, chunksize=chunksize, disable_tqdm=disable_tqdm
+        )
         .process_logits()
     )
     return mutation
 
 
 def get_esm2_bias_and_decoding_order(seq, fixed_pos, copies=1, device="cuda"):
-    return get_esm_bias_and_decoding_order(seq, fixed_pos, copies=copies, device=device, model_name='esm2_t36_3B_UR50D')
+    return get_esm_bias_and_decoding_order(
+        seq, fixed_pos, copies=copies, device=device, model_name="esm2_t36_3B_UR50D"
+    )
 
 
-def get_esm_bias_and_decoding_order(seq, fixed_pos, copies=1, device="cuda", model_name='esm2_t36_3B_UR50D', **kwargs):
+def get_esm_bias_and_decoding_order(
+    seq, fixed_pos, copies=1, device="cuda", model_name="esm2_t36_3B_UR50D", **kwargs
+):
     import esm
+
     print(f"running {model_name} ...")
     alphabet = list(order_aa.values())
     mutation_sites = np.where(np.array(fixed_pos) == 0)[0]
     assert len(fixed_pos) == len(seq)
     esm_model, esm_alphabet = getattr(esm.pretrained, model_name)()
     esm_priors = _convert_mutation_probs(
-        run_esm(esm_model, esm_alphabet, [("seq", seq)], mutation_sites, device=device, **kwargs),
+        run_esm(
+            esm_model,
+            esm_alphabet,
+            [("seq", seq)],
+            mutation_sites,
+            device=device,
+            **kwargs,
+        ),
         alphabet,
     )
     del esm_model, esm
@@ -383,34 +416,45 @@ def get_esm_bias_and_decoding_order(seq, fixed_pos, copies=1, device="cuda", mod
     return symmetrise_logits(logits, copies), decoding_order
 
 
-def get_msa_transformer_bias_and_decoding_order(msa, fixed_pos, copies=1, device="cuda", verbose=True, **kwargs):
+def get_msa_transformer_bias_and_decoding_order(
+    msa, fixed_pos, copies=1, device="cuda", verbose=True, **kwargs
+):
     import esm
 
-    if verbose: print("running ESM MSA-Transformer...")
+    if verbose:
+        print("running ESM MSA-Transformer...")
     alphabet = list(order_aa.values())
     mutation_sites = np.where(np.array(fixed_pos) == 0)[0]
 
     full_seq = msa[0][1]
     full_seq_len = len(full_seq)
     if full_seq_len > 1023:
-      print(f'msa sequence length ({full_seq_len}) is too long, considering only the last 1023 residues')
-      msa = [(n, s[-1023:]) for n,s in msa]
+        print(
+            f"msa sequence length ({full_seq_len}) is too long, considering only the last 1023 residues"
+        )
+        msa = [(n, s[-1023:]) for n, s in msa]
     assert len(fixed_pos) == full_seq_len
     offset = len(fixed_pos) - len(msa[0][1])
     if offset < 0:
-      raise RuntimeError("incompatible msa!")
+        raise RuntimeError("incompatible msa!")
     mutation_sites = mutation_sites - offset
-    assert np.sum(mutation_sites<0) == 0, 'at least one mutation site is in the truncated msa region'
+    assert (
+        np.sum(mutation_sites < 0) == 0
+    ), "at least one mutation site is in the truncated msa region"
     esm_model, esm_alphabet = esm.pretrained.esm_msa1b_t12_100M_UR50S()
     esm_priors = _convert_mutation_probs(
-        run_esm(esm_model, esm_alphabet, [msa], mutation_sites, chunksize=1, device=device), alphabet, **kwargs
+        run_esm(
+            esm_model, esm_alphabet, [msa], mutation_sites, chunksize=1, device=device
+        ),
+        alphabet,
+        **kwargs,
     )
-    if offset > 0 :
-      l, n = esm_priors.shape
-      b0 = np.zeros((full_seq_len-l, n))
-      for idx, res in enumerate(full_seq[:-1023]):
-        b0[idx, alphabet.index(res)] = 1
-      esm_priors = np.concatenate((b0, esm_priors))
+    if offset > 0:
+        l, n = esm_priors.shape
+        b0 = np.zeros((full_seq_len - l, n))
+        for idx, res in enumerate(full_seq[:-1023]):
+            b0[idx, alphabet.index(res)] = 1
+        esm_priors = np.concatenate((b0, esm_priors))
 
     del esm_model, esm
     empty_cache()
@@ -435,7 +479,11 @@ def get_frame2seq_bias_and_decoding_order(
 
     print("running frame2seq...")
     seqs = PDB.load(pdb_path).get_seqs()
-    chain_ids = [chain_id] if chain_id is not None and isinstance(chain_id, str) else list(seqs.keys())
+    chain_ids = (
+        [chain_id]
+        if chain_id is not None and isinstance(chain_id, str)
+        else list(seqs.keys())
+    )
     if len(seqs) > 1:
         print(
             f"concatenating features from chain_id={chain_ids} (`frame2seq` supports single-chain structures)"
@@ -445,26 +493,36 @@ def get_frame2seq_bias_and_decoding_order(
     fixed_positions = np.where(np.array(fixed_pos) != 0)[0]
 
     # concatenate features for multi-chain structures
-    features = [[x.to(device) for x in get_inference_inputs(pdb_path, c)] for c in chain_ids]
-    seq_mask, aatype, X = [torch.concat([f[i] for f in features], dim=1) for i in range(len(features[0]))]
+    features = [
+        [x.to(device) for x in get_inference_inputs(pdb_path, c)] for c in chain_ids
+    ]
+    seq_mask, aatype, X = [
+        torch.concat([f[i] for f in features], dim=1) for i in range(len(features[0]))
+    ]
 
-    input_aatype_onehot = torch.zeros(tuple(aatype.shape)+(len(residue_constants.ID_TO_AA),), device=device)
+    input_aatype_onehot = torch.zeros(
+        tuple(aatype.shape) + (len(residue_constants.ID_TO_AA),), device=device
+    )
     input_aatype_onehot[:, :, 20] = 1  # all positions are masked (set to unknown)
     for pos in fixed_positions:
         input_aatype_onehot[:, pos, :] = 0
-        input_aatype_onehot[:, pos, aatype[0][pos]] = 1  # fixed positions set to the input sequence
+        input_aatype_onehot[:, pos, aatype[0][pos]] = (
+            1  # fixed positions set to the input sequence
+        )
 
     with torch.no_grad():
         pred_seq1 = runner.models[0].forward(X, seq_mask, input_aatype_onehot)
         pred_seq2 = runner.models[1].forward(X, seq_mask, input_aatype_onehot)
         pred_seq3 = runner.models[2].forward(X, seq_mask, input_aatype_onehot)
         logits = (pred_seq1 + pred_seq2 + pred_seq3) / 3  # ensemble
-        entropy = - (logits.softmax(-1)*logits.log_softmax(-1)).sum(-1)
+        entropy = -(logits.softmax(-1) * logits.log_softmax(-1)).sum(-1)
         decoding_order = entropy[0].argsort(-1)
 
     alphabet = list(residue_constants.ID_TO_AA.values())
     idxs_map = torch.tensor([alphabet.index(a) for a in target_alphabet])
-    logits, decoding_order = to_np(logits[0, :, idxs_map]), to_np(decoding_order[:, None])
+    logits, decoding_order = to_np(logits[0, :, idxs_map]), to_np(
+        decoding_order[:, None]
+    )
     return symmetrise_logits(logits, copies), decoding_order
 
 
@@ -473,7 +531,8 @@ def get_extra_aa_bias(aa_bias_dict, seq_len, bias=None):
     aa_bias_dict = {aa.upper(): b for aa, b in aa_bias_dict.items()}
     for i, aa in order_aa.items():
         aa_bias[:, i] = aa_bias_dict.get(aa, 0)
-    return aa_bias if bias is None else bias+aa_bias
+    return aa_bias if bias is None else bias + aa_bias
+
 
 def get_ligand_mpnn_logits_and_decoding_order(
     input_pdb,
@@ -532,35 +591,153 @@ def get_saprot_bias_and_decoding_order(
     import saprot
     from saprot.utils.foldseek_util import get_struc_seq
     from saprot.utils.constants import aa_list
-    from saprot.model.saprot.saprot_foldseek_mutation_model import SaprotFoldseekMutationModel
+    from saprot.model.saprot.saprot_foldseek_mutation_model import (
+        SaprotFoldseekMutationModel,
+    )
     from protein_tools.pdb import PDB
 
     seqs = PDB.load(pdb_path).get_seqs()
-    chain_ids = [chain_id] if chain_id is not None and isinstance(chain_id, str) else list(seqs.keys())
+    chain_ids = (
+        [chain_id]
+        if chain_id is not None and isinstance(chain_id, str)
+        else list(seqs.keys())
+    )
 
     DIR = Path(saprot.__file__).parent.parent
     config = {
-    "foldseek_path": DIR / "bin/foldseek",
-    "config_path": DIR / "weights/PLMs/SaProt_650M_AF2",
-    "load_pretrained": True,
+        "foldseek_path": DIR / "bin/foldseek",
+        "config_path": DIR / "weights/PLMs/SaProt_650M_AF2",
+        "load_pretrained": True,
     }
 
-    parsed_seqs = get_struc_seq(
-        config['foldseek_path'],
-        pdb_path, chain_ids
-    )
+    parsed_seqs = get_struc_seq(config["foldseek_path"], pdb_path, chain_ids)
 
-    if len(parsed_seqs)>1:
-        print('PDB has more than one chain. concatenating the sequence ...')
-    seq = ''.join([x[0] for x in parsed_seqs.values()])
-    combined_seq = ''.join([x[-1] for x in parsed_seqs.values()])
+    if len(parsed_seqs) > 1:
+        print("PDB has more than one chain. concatenating the sequence ...")
+    seq = "".join([x[0] for x in parsed_seqs.values()])
+    combined_seq = "".join([x[-1] for x in parsed_seqs.values()])
     print(f"SaProt combined sequence:\n{combined_seq}\n")
 
     model = SaprotFoldseekMutationModel(**config)
     model.eval()
     model.to(device)
-    priors = np.stack([list(model.predict_pos_prob(combined_seq, resid).values()) for resid in range(1,1+len(seq))])
+    priors = np.stack(
+        [
+            list(model.predict_pos_prob(combined_seq, resid).values())
+            for resid in range(1, 1 + len(seq))
+        ]
+    )
     logits, decoding_order = get_bias_and_decoding_order(priors)
     idxs_map = np.array([aa_list.index(a) for a in target_alphabet])
     logits = logits[:, idxs_map]
     return symmetrise_logits(logits, copies), decoding_order
+
+
+def get_e1_bias_and_decoding_order(
+    seq, fixed_pos=None, context=None, copies=1, model_name="E1-300m", batchsize=1, **kwargs
+):
+    from E1.batch_preparer import E1BatchPreparer
+    from E1.modeling import E1ForMaskedLM
+
+    alphabet = list(order_aa.values())
+    fixed_pos = fixed_pos or np.zeros((len(seq), ))
+    assert len(fixed_pos) == len(seq)
+    mutation_sites = np.where(np.array(fixed_pos) == 0)[0]
+    device = (
+        torch.device("cuda", torch.cuda.current_device())
+        if torch.cuda.is_available()
+        else torch.device("cpu")
+    )
+
+    model = (
+        E1ForMaskedLM.from_pretrained(f"Profluent-Bio/{model_name}").to(device).eval()
+    )
+    batch_preparer = E1BatchPreparer()
+    vocab = batch_preparer.tokenizer.get_vocab()
+
+    print(f"running {model_name} ...")
+    if context:
+        masked_sequences = [
+            context + "," + seq[:mp] + "?" + seq[mp + 1 :] for mp in mutation_sites
+        ]
+    else:
+        masked_sequences = [seq[:mp] + "?" + seq[mp + 1 :] for mp in mutation_sites]
+
+    all_logits = []
+    for batch_idx in range(0, len(masked_sequences), batchsize):
+        batch = batch_preparer.get_batch_kwargs(
+            masked_sequences[batch_idx : batch_idx + batchsize], device=device
+        )
+        input_ids = batch["input_ids"]
+        with torch.no_grad():
+            with torch.autocast(
+                device.type, dtype=torch.bfloat16, enabled=device.type == "cuda"
+            ):
+                outputs = model(
+                    input_ids=batch["input_ids"],
+                    within_seq_position_ids=batch["within_seq_position_ids"],
+                    global_position_ids=batch["global_position_ids"],
+                    sequence_ids=batch["sequence_ids"],
+                    past_key_values=None,
+                    use_cache=False,
+                    output_attentions=False,
+                    output_hidden_states=False,
+                )
+        logits: torch.Tensor = outputs.logits  # (B, L, V)
+
+        last_sequence_selector = (
+            batch["sequence_ids"] == batch["sequence_ids"].max(dim=1)[0][:, None]
+        )
+        # residue_selector: True for tokens that are part of the input sequence i.e not boundary tokens like 1, 2, <bos>, <eos>, <pad>, etc.
+        residue_selector = ~(batch_preparer.get_boundary_token_mask(batch["input_ids"]))
+        # last_sequence_residue_selector: True for residues that are part of the last sequence (excluding boundary tokens)
+        last_sequence_residue_selector = last_sequence_selector & residue_selector
+        all_logits.extend(
+            [
+                logits[i, last_sequence_residue_selector[i]].cpu().numpy()[None, :]
+                for i in range(input_ids.shape[0])
+            ]
+        )
+
+    all_logits = np.concatenate(all_logits, axis=0)
+    logits = all_logits.mean(0)
+    for i, p in enumerate(mutation_sites):
+        logits[p, :] = all_logits[i, p, :]
+
+    sm = softmax(logits, axis=-1)
+    log_sm = logits - logsumexp(logits, axis=-1, keepdims=True)
+    entropy = -(sm * log_sm).sum(axis=-1)
+    decoding_order = entropy.argsort(axis=-1)
+
+    idx_map = [vocab[a] for a in alphabet]
+    logits = logits[:, idx_map]
+
+    return symmetrise_logits(logits, copies), decoding_order
+
+
+def sample_from_msa(
+    msa_path,
+    max_num_samples=511,
+    max_token_length=14784,
+    max_query_similarity=0.96,
+    min_query_similarity=0.0,
+    neighbor_similarity_lower_bound=0.8,
+    seed=None,
+):
+    from E1.msa_sampling import sample_context
+
+    context, _ = sample_context(
+        msa_path=msa_path,
+        # Maximum number of sequences that can be in context (hard limit of 511)
+        max_num_samples=max_num_samples,
+        # Total number of residues in the context
+        max_token_length=max_token_length,
+        # Maximum similarity of any context sequence to the query sequence
+        max_query_similarity=max_query_similarity,
+        # Minimum similarity of any context sequence to the query sequence
+        min_query_similarity=min_query_similarity,
+        # Minimum similarity between any two context sequences for them to be considered neighbors
+        neighbor_similarity_lower_bound=neighbor_similarity_lower_bound,
+        seed=seed,
+    )
+    return context
