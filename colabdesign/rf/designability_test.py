@@ -82,7 +82,7 @@ def main(argv):
     ag.add(["saprot_bias"], False, None, ["enables SaProt priors"])
     ag.add(["e1_bias"], False, None, ["enables E1 priors"])
     ag.add(["e1_context_max_tokens="], 60000, int, ["max tokens for the E1 MSA context. Final bias is the average of E1 logits over three progressively shorter contexts. default: 60000"])
-    ag.add(["e1_num_seeds="], 1, str, ["number of seeds per context size when sampling E1 contexts"])
+    ag.add(["e1_num_seeds="], 1, int, ["number of seeds per context size when sampling E1 contexts"])
     ag.add(["e1_model_name="], 'E1-300M', str, ["E1 model name. default: 'E1-300M'"])
     ag.add(["bias_npy="], None, str, ["bias numpy array file"])
     ag.add(["decoding_order_npy="], None, str, ["decoding_order numpy array file"])
